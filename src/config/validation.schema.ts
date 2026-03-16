@@ -28,4 +28,9 @@ export const validationSchema = Joi.object({
   FX_CACHE_TTL: Joi.number().default(60000),
 
   SUPPORTED_CURRENCIES: Joi.string().default('NGN,USD,EUR,GBP,CAD,JPY'),
+
+  REDIS_HOST: Joi.string().optional(),
+  REDIS_PORT: Joi.number().default(6379),
+  REDIS_PASSWORD: Joi.string().optional().allow(''),
+  REDIS_TTL: Joi.number().default(60000),
 });

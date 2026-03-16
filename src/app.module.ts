@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CacheModule } from '@nestjs/cache-manager';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { redisStore, RedisStore } from 'cache-manager-redis-yet';
 
 import { validationSchema } from './config/validation.schema';
 import databaseConfig from './config/database.config';
@@ -19,6 +20,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { MailModule } from './mail/mail.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { RolesGuard } from './common/guards/roles.guard';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 
 @Module({
@@ -47,9 +49,26 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
             : false,
       }),
     }),
-    CacheModule.register({
+    CacheModule.registerAsync({
       isGlobal: true,
-      ttl: 60000,
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => {
+        const redisHost = configService.get<string>('REDIS_HOST');
+        if (!redisHost) {
+          return { ttl: configService.get<number>('FX_CACHE_TTL', 60000) };
+        }
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        const store: RedisStore = await redisStore({
+          socket: {
+            host: redisHost,
+            port: configService.get<number>('REDIS_PORT', 6379),
+          },
+          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+          ttl: configService.get<number>('REDIS_TTL', 60000),
+        });
+        return { store };
+      },
     }),
     AuthModule,
     UsersModule,
@@ -62,6 +81,10 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,
     },
     {
       provide: APP_FILTER,

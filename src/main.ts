@@ -31,6 +31,7 @@ async function bootstrap() {
     .addTag('wallet', 'Wallet balances, funding, conversion, and trading')
     .addTag('fx', 'Real-time FX rates')
     .addTag('transactions', 'Transaction history')
+    .addTag('admin', 'Admin-only endpoints')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

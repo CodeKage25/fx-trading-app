@@ -26,4 +26,11 @@ export class UsersService {
     const user = this.usersRepository.create(data);
     return this.usersRepository.save(user);
   }
+
+  async findAll(): Promise<Partial<User>[]> {
+    return this.usersRepository.find({
+      select: ['id', 'email', 'role', 'isVerified', 'createdAt', 'updatedAt'],
+      order: { createdAt: 'DESC' },
+    });
+  }
 }

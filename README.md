@@ -133,6 +133,12 @@ Full interactive docs available at `/api` (Swagger UI). Below is a summary.
 |--------|----------|-------------|------|
 | GET | `/transactions?page=1&limit=20&type=TRADE` | Paginated history | Bearer JWT |
 
+### Admin
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/admin/users` | List all registered users | Bearer JWT (Admin only) |
+
 ### Example: Register → Verify → Trade
 
 **1. Register**
@@ -185,6 +191,108 @@ Content-Type: application/json
 
 ---
 
+## Flow Diagrams
+
+### Registration & OTP Verification
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as AuthController
+    participant AS as AuthService
+    participant DB as PostgreSQL
+    participant M as MailService
+
+    C->>A: POST /auth/register { email, password }
+    A->>AS: register(dto)
+    AS->>DB: findByEmail — check duplicate
+    DB-->>AS: null (not exists)
+    AS->>DB: create user (hashed pw, OTP, expires_at)
+    AS->>M: sendOtp(email, otpCode)
+    M-->>C: Email with 6-digit OTP
+    AS-->>C: 201 { userId }
+
+    C->>A: POST /auth/verify { email, otp }
+    A->>AS: verifyOtp(dto)
+    AS->>DB: findByEmail
+    DB-->>AS: User record
+    AS->>AS: validate OTP + expiry
+    AS->>DB: update isVerified=true, clear OTP
+    AS->>DB: initializeWallets (all currencies)
+    AS-->>C: 200 { accessToken }
+```
+
+### Wallet Funding
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant W as WalletController
+    participant WS as WalletService
+    participant DB as PostgreSQL
+
+    C->>W: POST /wallet/fund { currency, amount, reference? }
+    W->>WS: fundWallet(userId, dto)
+    WS->>DB: findOne(reference) — idempotency check
+    alt Duplicate reference
+        DB-->>C: 200 existing transaction
+    end
+    WS->>WS: validateCurrency()
+    WS->>DB: BEGIN TRANSACTION
+    WS->>DB: INSERT transaction (PENDING)
+    WS->>DB: SELECT wallet_balance FOR UPDATE (pessimistic lock)
+    alt Balance row exists
+        WS->>DB: UPDATE balance += amount
+    else First funding for this currency
+        WS->>DB: INSERT new wallet_balance row
+    end
+    WS->>DB: UPDATE transaction → COMPLETED
+    WS->>DB: COMMIT
+    WS-->>C: 201 { reference, currency, amount }
+```
+
+### Currency Conversion & Trading
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant W as WalletController
+    participant WS as WalletService
+    participant FX as FxService
+    participant Cache as CacheManager
+    participant API as ExchangeRate-API
+
+    C->>W: POST /wallet/convert { fromCurrency, toCurrency, amount }
+    W->>WS: convertCurrency(userId, dto)
+    WS->>WS: validateCurrencies()
+    WS->>FX: getRate(from, to)
+    FX->>Cache: get("fx_rates_NGN")
+    alt Cache hit
+        Cache-->>FX: FxRates
+    else Cache miss
+        FX->>API: GET /latest/NGN
+        API-->>FX: conversion_rates{}
+        FX->>Cache: set("fx_rates_NGN", rates, TTL)
+    end
+    FX->>FX: compute cross-rate (toRate / fromRate)
+    FX-->>WS: rate
+    WS->>WS: toAmount = amount × rate
+    WS->>DB: BEGIN TRANSACTION
+    WS->>DB: INSERT transaction (PENDING)
+    WS->>DB: SELECT from_balance FOR UPDATE
+    WS->>WS: assert sufficient balance
+    WS->>DB: SELECT to_balance FOR UPDATE
+    WS->>DB: UPDATE from_balance -= amount
+    WS->>DB: UPDATE to_balance += toAmount
+    WS->>DB: UPDATE transaction → COMPLETED
+    WS->>DB: COMMIT
+    WS-->>C: 201 { reference, rate, fromAmount, toAmount }
+
+    note over WS,DB: POST /wallet/trade follows the same flow,<br/>recorded as type=TRADE instead of CONVERSION
+```
+
+---
+
 ## Architectural Decisions
 
 ### Multi-Currency Wallet: Row-per-Currency Model
@@ -218,13 +326,13 @@ Global JWT guard applied via `APP_GUARD` — all endpoints require authenticatio
 4. **Email delivery** — Gmail SMTP with App Password. Production should use SendGrid/Mailgun.
 5. **No refresh tokens** — access tokens expire in 15 minutes. Production should add refresh token rotation.
 6. **Schema auto-sync** — `synchronize: true` in development only. Production should use TypeORM migrations.
-7. **In-memory cache** — suitable for single-instance. Scale-out scenarios should use Redis.
+7. **Cache** — defaults to in-memory. Set `REDIS_HOST` to switch to Redis automatically (no code changes needed).
 
 ---
 
 ## Scaling Considerations
 
-- Replace in-memory cache with Redis (`cache-manager-redis-store`) for multi-instance deployments
+- **Redis caching is already supported** — set `REDIS_HOST` in `.env` to enable it for multi-instance deployments
 - Use TypeORM migrations instead of `synchronize: true` in production
 - Add a message queue (Bull/BullMQ) for async operations like email sending
 - Implement rate limiting (`@nestjs/throttler`) to prevent abuse
