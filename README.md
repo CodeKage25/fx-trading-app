@@ -14,7 +14,7 @@ A production-ready NestJS backend for an FX Trading App. Users can register, ver
 | Authentication | JWT (Passport) |
 | Email | Nodemailer (Gmail SMTP) |
 | FX Rates | ExchangeRate-API (v6) |
-| Caching | NestJS Cache Manager (in-memory) |
+| Caching | NestJS Cache Manager (in-memory or Redis) |
 | Docs | Swagger / OpenAPI |
 
 ---
@@ -138,6 +138,14 @@ Full interactive docs available at `/api` (Swagger UI). Below is a summary.
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
 | GET | `/admin/users` | List all registered users | Bearer JWT (Admin only) |
+
+### Analytics
+
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| GET | `/analytics/trades` | Trade volume & counts by type/currency (last 30 days) | Bearer JWT (Admin only) |
+| GET | `/analytics/fx-trends?currency=USD&days=7` | Historical FX rate snapshots for a currency | Public |
+| GET | `/analytics/users/:id/activity` | Transaction summary for a specific user | Bearer JWT (Admin only) |
 
 ### Example: Register → Verify → Trade
 
@@ -313,6 +321,9 @@ Every mutation (fund, convert, trade) accepts an optional `reference` UUID. If a
 ### Transaction Status Lifecycle
 Transactions are created in `PENDING` state before any balance updates begin. On success they move to `COMPLETED`; on failure the transaction is rolled back and marked `FAILED`. This provides an audit trail even for failed operations.
 
+### FX Rate Snapshots for Analytics
+Every time a fresh rate fetch succeeds, all currency rates are persisted as rows in `fx_rate_snapshots (base, currency, rate, fetchedAt)`. This is fire-and-forget (non-blocking) and enables historical FX trend queries via `GET /analytics/fx-trends`. The snapshot store grows over time and can be pruned by a scheduled job in production.
+
 ### JWT Authentication
 Global JWT guard applied via `APP_GUARD` — all endpoints require authentication by default. Routes opt out using the `@Public()` decorator. This is safer than opt-in authentication (forgetting to add a guard).
 
@@ -338,3 +349,14 @@ Global JWT guard applied via `APP_GUARD` — all endpoints require authenticatio
 - Implement rate limiting (`@nestjs/throttler`) to prevent abuse
 - Add a payment gateway (Paystack/Flutterwave) for real funding flows
 - Consider read replicas for transaction history queries under heavy load
+
+---
+
+## Bonus Features Implemented
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| **Role-Based Access Control** | ✅ Done | `UserRole.USER` / `UserRole.ADMIN` enum, `@Roles()` decorator, `RolesGuard`, admin endpoints under `/admin/*` and `/analytics/*` |
+| **Redis Caching** | ✅ Done | `CacheModule` auto-switches to Redis when `REDIS_HOST` is set; falls back to in-memory. FX rates cached with configurable TTL |
+| **Idempotency** | ✅ Done | Optional `reference` field on all wallet operations (fund/convert/trade). Duplicate reference returns existing transaction instead of re-executing |
+| **Analytics & Activity Logging** | ✅ Done | `GET /analytics/trades` — trade volume by type/currency; `GET /analytics/fx-trends` — historical FX rate snapshots stored on every live fetch; `GET /analytics/users/:id/activity` — per-user transaction summary |

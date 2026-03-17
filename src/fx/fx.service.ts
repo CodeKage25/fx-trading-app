@@ -7,7 +7,10 @@ import { ConfigService } from '@nestjs/config';
 import type { Cache } from 'cache-manager';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import axios from 'axios';
+import { FxRateSnapshot } from '../analytics/fx-rate-snapshot.entity';
 
 export interface FxRates {
   base: string;
@@ -24,6 +27,8 @@ export class FxService {
   constructor(
     private readonly configService: ConfigService,
     @Inject(CACHE_MANAGER) private readonly cacheManager: Cache,
+    @InjectRepository(FxRateSnapshot)
+    private readonly snapshotRepo: Repository<FxRateSnapshot>,
   ) {
     this.supportedCurrencies = this.configService
       .get<string>('SUPPORTED_CURRENCIES', 'NGN,USD,EUR,GBP,CAD,JPY')
@@ -51,6 +56,9 @@ export class FxService {
         this.configService.get<number>('FX_CACHE_TTL', 60000),
       );
       this.lastKnownRates = rates;
+      this.saveSnapshots(rates).catch((err) =>
+        this.logger.warn(`Failed to save FX snapshots: ${err.message}`),
+      );
       return rates;
     } catch (err) {
       this.logger.warn(
@@ -106,6 +114,18 @@ export class FxService {
 
   getSupportedCurrencies(): string[] {
     return this.supportedCurrencies;
+  }
+
+  private async saveSnapshots(fxRates: FxRates): Promise<void> {
+    const snapshots = Object.entries(fxRates.rates).map(([currency, rate]) => {
+      const snap = this.snapshotRepo.create({
+        base: fxRates.base,
+        currency,
+        rate: String(rate),
+      });
+      return snap;
+    });
+    await this.snapshotRepo.save(snapshots);
   }
 
   private async fetchFromApi(base: string): Promise<FxRates> {

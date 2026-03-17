@@ -11,6 +11,7 @@ import databaseConfig from './config/database.config';
 import { User } from './users/user.entity';
 import { WalletBalance } from './wallet/wallet-balance.entity';
 import { Transaction } from './transactions/transaction.entity';
+import { FxRateSnapshot } from './analytics/fx-rate-snapshot.entity';
 
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -18,6 +19,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { FxModule } from './fx/fx.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { MailModule } from './mail/mail.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -40,7 +42,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
         username: configService.get<string>('DB_USERNAME'),
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_DATABASE'),
-        entities: [User, WalletBalance, Transaction],
+        entities: [User, WalletBalance, Transaction, FxRateSnapshot],
         synchronize: configService.get<string>('NODE_ENV') !== 'production',
         logging: configService.get<string>('NODE_ENV') === 'development',
         ssl:
@@ -76,6 +78,7 @@ import { AllExceptionsFilter } from './common/filters/http-exception.filter';
     FxModule,
     TransactionsModule,
     MailModule,
+    AnalyticsModule,
   ],
   providers: [
     {
